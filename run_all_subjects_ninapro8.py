@@ -2,7 +2,7 @@ from main_2models import main
 import numpy as np
 
 wandb_status="disabled"
-project="sEMG_DOA_regression_start_05_01_23"
+project="sEMG_DOA_regression"
 # window size
 ws=2000
 # size of kernel and stride of the convolution embedding
@@ -27,8 +27,6 @@ for i in range(len(svs_list)):
                                         wandb_status=wandb_status,
                                         pre_trained_model_name=group+'_'+name,
 
-                                        log_interval=1,
-                                        training=False,
                                         binarize_embedding=True,
                                         spiking_transformer_mlp=True,
                                         spiking_qkv_proj=True,                                        
