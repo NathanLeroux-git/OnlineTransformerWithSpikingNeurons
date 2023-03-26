@@ -10,7 +10,6 @@ import continuous_model
 from continuous_model import torch_init_LSUV
 from config_continuous_attention import return_args
 from utils import del_previous_plots, transfer_weights, fix_LIF_states
-from send_mail import failure_alert
 from data_loader_generator_ninapro8 import _load_ninapro8_emg_windows as _load_data
 from data_loader_generator_ninapro8 import make_loader
 
@@ -20,7 +19,7 @@ def main(**kwargs):
     The training model is parallel whereas the testing model is online and sequential, but they are equivalent.
     At each epoch, the weights of the training model are transfered to the testing model.
     """
-    # try:
+
     torch.autograd.set_detect_anomaly(True)
     # update parameters from config file and import other parameters 
     args = return_args() if not('outer_parameters' in kwargs) else return_args(**kwargs['outer_parameters'])    
@@ -62,7 +61,7 @@ def main(**kwargs):
 
     # create dataset
     data_test, start_idx_test = _load_data(args, times=[2]) if args.testing else (None, None)
-    data_train, start_idx_train = _load_data(args, times=[0]) if args.training else (None, None)    
+    data_train, start_idx_train = _load_data(args, times=[0,1]) if args.training else (None, None)    
 
     # training and testing model
     log_count = 0    
@@ -136,12 +135,6 @@ def main(**kwargs):
     wandb_run.finish()
     return True
     
-    # except Exception as error:
-    #     error_message=f'Run: {wandb_run._name}\n{wandb_run.get_url()}\nof group: {wandb_run._get_group()}\n\nFailed or Crashed\n\nError message:\n{error}'
-    #     print(error_message)
-    #     failure_alert(error_message)       
-    #     return False 
-
 def resume_scheduler(scheduler, previous_job_epoch):
     [scheduler.step() for _ in range(previous_job_epoch)]
     return

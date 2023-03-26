@@ -25,7 +25,7 @@ for i in range(len(svs_list)):
         # experiment parameters
         kwargs = dict(outer_parameters=dict(
                                         wandb_status=wandb_status,
-                                        pre_trained_model_name=group+'_'+name,
+                                        # pre_trained_model_name=group+'_'+name,
 
                                         binarize_embedding=True,
                                         spiking_transformer_mlp=True,
