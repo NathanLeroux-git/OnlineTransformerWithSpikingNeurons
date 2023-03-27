@@ -232,7 +232,7 @@ class transformer_block_encoder(nn.Module):
     def __init__(self, args, continuous=True, KV_reshape=False):
         super().__init__()
         self.norm1 = nn.LayerNorm(args.embed_dim) if not(args.binarize_embedding) and not(args.spiking_embedding) else nn.Identity()
-        atten_fn = getattr(continuous_model, "LinearizedAttention") if continuous else getattr(continuous_model, "ParallelAttention") if not(KV_reshape) else getattr(continuous_model, "LinearizedReshapedParallelAttention") 
+        atten_fn = getattr(continuous_model, "Attention") if continuous else getattr(continuous_model, "ParallelAttention") if not(KV_reshape) else getattr(continuous_model, "ReshapedParallelAttention") 
         self.atten = atten_fn(args)
         self.norm2 = nn.LayerNorm(args.embed_dim) 
         if not(args.spiking_transformer_mlp):
