@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from train_test_seq2seq import train, test
 from tqdm import tqdm
 import wandb
@@ -9,17 +10,27 @@ import random
 import continuous_model
 from continuous_model import torch_init_LSUV
 from config_continuous_attention import return_args
-from utils import del_previous_plots, transfer_weights, fix_LIF_states
-from data_loader_generator_ninapro8 import _load_ninapro8_emg_windows as _load_data
-from data_loader_generator_ninapro8 import make_loader
+from utils import del_previous_plots, transfer_weights
+from fix_LIFstates_model_file import fix_LIF_states
+from send_mail import failure_alert
+
+device='cpu'
+subject=0
+lr=1e-3
+bs=64
+datAug=64
+wd=0
+ws=2000 
+ks=30
+stride=28
+padding=int((ks-stride)/2)
+ntokens=int((ws-ks+2*padding)/stride+1)
+stored_vector_size=150
+name = f'quantized_transformer_sub_{subject:02d}_continuous_transfo_conv_embed_lr={lr:.0e}_datAug={datAug}_bs={bs}_wd={wd:.0e}_ws={ws}_np={ntokens}_svs={stored_vector_size}_ks={ks}_s={stride}_p={padding} (0)'
+group = "TESTS_quantization"
 
 def main(**kwargs): 
-    """
-    This function uses two models: one for training and one for testing. 
-    The training model is parallel whereas the testing model is online and sequential, but they are equivalent.
-    At each epoch, the weights of the training model are transfered to the testing model.
-    """
-
+    # try:
     torch.autograd.set_detect_anomaly(True)
     # update parameters from config file and import other parameters 
     args = return_args() if not('outer_parameters' in kwargs) else return_args(**kwargs['outer_parameters'])    
@@ -29,7 +40,7 @@ def main(**kwargs):
                             group=args["group"],
                             notes="",
                             config=args,
-                            mode=args["wandb_status"]) if not('wandb_run' in kwargs) else kwargs['wandb_run']
+                            mode="disabled") if not('wandb_run' in kwargs) else kwargs['wandb_run']
     # change args dictonary to a wandb config object and allow wandb to track it
     args = wandb_run.config
     
@@ -37,21 +48,36 @@ def main(**kwargs):
     random.seed(args.seed) if isinstance(args.seed, int) else None
     torch.manual_seed(args.seed) if isinstance(args.seed, int) else None
 
+    # load dataset on RAM and make appropriate transformations 
+    if args.dataset=='ninapro8':
+        from data_loader_generator_ninapro8 import _load_ninapro8_emg_windows as _load_data
+        from data_loader_generator_ninapro8 import make_loader
+        # n_channels, data_train, start_idx_train = _load_data(args, times=[0,1])
+        n_channels, data_test, start_idx_test = _load_data(args, times=[2])
+    elif args.dataset=='ninapro5':
+        from data_loader_generator_ninapro5 import _load_ninapro5_emg_windows as _load_data
+        from data_loader_generator_ninapro5 import make_loader
+        n_channels, data_train, start_idx_train = _load_data(args, times=[0,1,2], train=True, ratio=2/3)
+        # n_channels, data_test, start_idx_test = _load_data(args, times=[0,1,2], train=False, ratio=2/3)
+    
+    # n_channels=16
+
     # define model, optimizer, scheduler and loss function
-    model_test = getattr(continuous_model, args.Net)(args, 16, 5).to(args.device)
-    model_train = getattr(continuous_model, args.trainingNet)(args, 16, 5).to(args.device)
-    # model_train = getattr(continuous_model, args.Net)(args, 16, 5).to(args.device)
+    model_test = getattr(continuous_model, args.Net)(args, n_channels, 5).to(args.device)
+    model_train = getattr(continuous_model, "ParallelTrainingTransformer")(args, n_channels, 5).to(args.device)
+    # model_train = getattr(continuous_model, args.Net)(args, n_channels, 5).to(args.device)
     model_to_load = torch.load("./saved_models/"+args.pre_trained_model_name+".pt", map_location=args.device) if args.pre_trained_model_name is not None else None
-    model_to_load = fix_LIF_states(model_to_load)
+    model_to_load = fix_LIF_states(args, model_to_load)
     model_train.load_state_dict(model_to_load, strict=False) if args.pre_trained_model_name is not None else None
     transfer_weights(model_train, model_test)
     
-    if args.post_quantization:
-        model_test= torch.quantization.quantize_dynamic(model_test.to(torch.device('cpu')), dtype=torch.qint8)
-        model_train = torch.quantization.quantize_dynamic(model_train.to(torch.device('cpu')), dtype=torch.qint8)    
+    # Quantization
+    # model_test= torch.quantization.quantize_dynamic(model_test.to(torch.device('cpu')), dtype=torch.qint8)
+    # model_train = torch.quantization.quantize_dynamic(model_train.to(torch.device('cpu')), dtype=torch.qint8)    
+    ##############
     
     optimizer = getattr(optim, args.optimizer)(model_train.parameters(), lr=args.lr, weight_decay=args.weight_decay) if not('optimizer' in kwargs) else kwargs['optimizer']
-    scheduler = getattr(lr_scheduler, args.scheduler)(optimizer, **args.scheduler_args) if not('scheduler' in kwargs) else kwargs['scheduler']
+    scheduler = getattr(lr_scheduler, args.scheduler)(optimizer, **args.scheduler_args) if not('scheduler' in kwargs) else kwargs['scheduler'] #(optimizer, **args.scheduler_args) 
     # resuming the scheduler to a specific step is useful when resuming a previous job
     resume_scheduler(scheduler, args.previous_job_epoch)
     criterion = getattr(nn, args.loss_fn)()    
@@ -59,41 +85,33 @@ def main(**kwargs):
     # make wandb watch the model
     wandb_run.watch(model_test, criterion=criterion, log="all", log_freq=1000//args.batch_size)
 
-    # create dataset
-    data_test, start_idx_test = _load_data(args, times=[2]) if args.testing else (None, None)
-    data_train, start_idx_train = _load_data(args, times=[0,1]) if args.training else (None, None)    
-
     # training and testing model
     log_count = 0    
     for epoch in tqdm(range(args.epochs-args.previous_job_epoch)): 
-        if args.device != 'cpu':
-            with torch.cuda.device(args.device):
-                torch.cuda.empty_cache() 
+        torch.cuda.empty_cache() 
         epoch += args.previous_job_epoch
         print(f'\n____________________________________\nEpoch: {epoch:.0f}\n')
         
-        ### Testing ###        
-        if args.testing:
-            test_loader = make_loader(args, data_test, start_idx_test, train=False, specific_subject=None)
-            # Initiate SNN synases           
-            model_test.eval()         
-            x, y = next(iter(test_loader))
-            if epoch==0 and args.pre_trained_model_name is None: 
-                torch_init_LSUV(model_test, x, y=y, tgt_mu=-0.75) 
-            model_test.init_epoch(x)
-            metrics_test, fig_test, sparsity = test(args, model_test, test_loader, criterion, epoch, wandb_run)
+        ## Init testing ###        
+        test_loader = make_loader(args, data_test, start_idx_test, train=False, specific_subject=None)
+        # Initiate model           
+        model_test.eval()         
+        x, y = next(iter(test_loader))
+        if epoch==0 and args.pre_trained_model_name is None: 
+            torch_init_LSUV(model_test, x, y=y, tgt_mu=-0.75) 
+        model_test.init_epoch(x)
+        metrics_test, fig_test, sparsity = test(args, model_test, test_loader, criterion, epoch, wandb_run)
         
-        ### Training ###                  
-        if args.training:     
-            train_loader = make_loader(args, data_train, start_idx_train, train=True, specific_subject=None)   
-            # Initiate SNN synases                     
-            if epoch==0 and args.pre_trained_model_name is None: 
-                model_train.train()
-                x, y = next(iter(train_loader))
-                torch_init_LSUV(model_train, x, y=y, tgt_mu=-0.75)        
-            metrics_train, log_count, scheduler, sparsity_train = train(args, model_train, scheduler, train_loader, criterion, optimizer, epoch, wandb_run, log_count)   
-        
-        # Map the weights of the training model to the testing model
+        ### init training ###                       
+        train_loader = make_loader(args, data_train, start_idx_train, train=True, specific_subject=None)   
+        # Initiate model                 
+        if epoch==0 and args.pre_trained_model_name is None: 
+            model_train.train()
+            x, y = next(iter(train_loader))
+            torch_init_LSUV(model_train, x, y=y, tgt_mu=-0.75)        
+
+            
+        metrics_train, log_count, scheduler, fig_train, sparsity_train = train(args, model_train, scheduler, train_loader, criterion, optimizer, epoch, wandb_run, log_count)   
         transfer_weights(model_train, model_test)
     
         scheduler.step() 
@@ -104,45 +122,86 @@ def main(**kwargs):
                         "10° - accuracy train": metrics_train[2],
                         "15° - accuracy train": metrics_train[3],
                         "R² score train":       metrics_train[4],
+                        "Train results":        fig_train,
                         "MAE (degrees) test":   metrics_test[0],
                         "MSE (degrees²) test":  metrics_test[1],
                         "10° - accuracy test":  metrics_test[2],
                         "15° - accuracy test":  metrics_test[3],
                         "R² score test":        metrics_test[4],
-                        "Embedding sparsity train":   sparsity_train[0],
-                        "V sparsity train":   sparsity_train[1],
-                        "Attention sparsity train (before sum on Dembedding)":sparsity_train[2],
-                        "Attention sparsity train":   sparsity_train[3],
-                        "Mean attention train": sparsity_train[4],
-                        "Weighted average sparsity train (before sum on stored tokens)":   sparsity_train[5],
-                        "Weighted average sparsity train":sparsity_train[6],
-                        "Mean weighted average train": sparsity_train[7],
-                        "MLP sparsity train": sparsity_train[8],
-                        "Embedding sparsity":         sparsity[0],
-                        "V sparsity":         sparsity[1],
-                        "Attention sparsity (before sum on Dembedding)":sparsity[2],
-                        "Attention sparsity":   sparsity[3],
-                        "Mean attention": sparsity[4],
-                        "Weighted average sparsity (before sum on stored tokens)":   sparsity[5],
-                        "Weighted average sparsity":sparsity[6],
-                        "Mean weighted average":sparsity[7],
-                        "MLP sparsity": sparsity[8],
-                        "Figure test": fig_test,
+                        "Test results":         fig_test,
+                        "QKV sparsity train":   sparsity_train[0],
+                        "Attention sparsity train (before sum on Dembedding)":sparsity_train[1],
+                        "Attention sparsity train":   sparsity_train[2],
+                        "Mean attention train": sparsity_train[3],
+                        "Weighted average sparsity train (before sum on stored tokens)":   sparsity_train[4],
+                        "Weighted average sparsity train":sparsity_train[5],
+                        "Mean weighted average train": sparsity_train[6],
+                        "QKV sparsity":         sparsity[0],
+                        "Attention sparsity (before sum on Dembedding)":sparsity[1],
+                        "Attention sparsity":   sparsity[2],
+                        "Mean attention": sparsity[3],
+                        "Weighted average sparsity (before sum on stored tokens)":   sparsity[4],
+                        "Weighted average sparsity":sparsity[5],
+                        "Mean weighted average":sparsity[6],
                         })        
         del_previous_plots(epoch, wandb_run)
         if args.save_model:
             torch.save(model_train.state_dict(), "./saved_models/"+args.save_model_name+".pt")
     wandb_run.finish()
     return True
-    
+    # except Exception as error:
+    #     error_message=f'Run: {wandb_run._name}\n{wandb_run.get_url()}\nof group: {wandb_run._get_group()}\n\nFailed or Crashed\n\nError message:\n{error}'
+    #     print(error_message)
+    #     failure_alert(error_message)       
+    #     return False 
+
 def resume_scheduler(scheduler, previous_job_epoch):
     [scheduler.step() for _ in range(previous_job_epoch)]
     return
 
 if __name__ == '__main__':   
     kwargs = dict(outer_parameters=dict(
+                                        project="sEMG_DOA_regression_start_05_01_23",
+                                        name=name,
+                                        group=group,
+                                        dataset='ninapro8',
+                                        device=device,   
+                                        subjects=[subject],           
+                                        Net='transformer',
+                                        # Net="ContinuousTransformer",    
+                                        embedding_model='ConvPatchEmbed',    
+                                        log_interval=40,
+                                        epochs=1,                                 
+                                        
+                                        # spiking_transformer_mlp=True,
+                                        # mlp_depth=3,      
+                                                             
+                                        # head_dim=8,   
+                                        # n_heads=4,        
+                                        
+                                        # attention_dilation=2,
+                                        
+                                        loss_fn="L1Loss",
+                                        window_size=ws,
+                                        sliding_size=ws,
+                                        n_patches=ntokens,
+                                        stored_vector_size=stored_vector_size,
+                                        test_batch_size=1,
+                                        batch_size=bs,
+                                        shuffle_dataset=True,
+                                        lr=lr,                    
+                                        weight_decay=wd,                    
+                                        conv_kernel_size=ks,
+                                        conv_stride=stride,
+                                        data_augmentation_factor=datAug,
+                                        
+                                        save_model=True,
+                                        save_model_name=name,
+                                        
+                                        pre_trained_model_name="transformer_sub_00_continuous_transfo_conv_embed_lr=1e-03_datAug=64_bs=64_wd=0e+00_ws=2000_np=71_svs=150_ks=30_s=28_p=1 (0)"
                                         )
-                  )                            
+                )
+                
     main(**kwargs)
     
 
