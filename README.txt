@@ -1,7 +1,7 @@
 The required steps to install the correct python environement:
 
 -The code requires python 3.10:
-conda create --name yourenvname python=3.10 pytorch==1.12.0 torchvision=0.13 cudatoolkit=11.3
+conda create --name yourenvname python=3.10
 
 -To activate the environement:
 conda activate yourenvname
