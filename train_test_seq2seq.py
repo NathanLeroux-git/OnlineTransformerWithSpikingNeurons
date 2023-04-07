@@ -61,9 +61,9 @@ def test(args, model, test_loader, criterion, epoch, wandb_run = None, log_count
     model.eval()   
     total_loss = 0       
     # Tensor created to store the time trace input, target, results
-    total_input = torch.empty(16, 1).to(args.device) 
-    total_output = torch.empty(5, 1).to(args.device) 
-    total_y = torch.empty(5, 1).to(args.device) 
+    # total_input = torch.empty(16, 1).to(args.device) 
+    # total_output = torch.empty(5, 1).to(args.device) 
+    # total_y = torch.empty(5, 1).to(args.device) 
     metrics = [] 
     sparsity_tensor = torch.zeros(len(test_loader), 9).to(args.device)
     with torch.no_grad():
@@ -76,9 +76,9 @@ def test(args, model, test_loader, criterion, epoch, wandb_run = None, log_count
             metrics = cat_metrics(output, y, metrics) 
             loss = criterion(output, y)
             total_loss += loss.item()
-            total_input = torch.cat((total_input, x[0]), dim=1)
-            total_output = torch.cat((total_output, output[0]), dim=1)
-            total_y = torch.cat((total_y, y[0]), dim=1)
+            # total_input = torch.cat((total_input, x[0]), dim=1)
+            # total_output = torch.cat((total_output, output[0]), dim=1)
+            # total_y = torch.cat((total_y, y[0]), dim=1)
             if batch_idx % args.log_interval == 0:
                 print(f'\nEpoch {epoch:.0f}\tTest \t|\t[{batch_idx:.0f}/{len(test_loader):.0f} ({100.*batch_idx/len(test_loader):.0f}%)]\t|\tLoss: {loss.item():.3f}')
                 wandb_run.log({"epoch": epoch, "batch_test_loss": loss})   
@@ -86,8 +86,8 @@ def test(args, model, test_loader, criterion, epoch, wandb_run = None, log_count
         metrics = [np.mean(met) for met in metrics]
         print(f'\nTest set\t|\tLoss={mean_loss:.4f}')
         print(f'MAE={metrics[0]:.4f}\tMSE={metrics[1]:.4f}\t10°accuracy={metrics[2]:.4f}\t15°accuracy={metrics[3]:.4f}\n')
-        fig = plot_DOA_and_results(args.group, args.dataset, total_input, total_y, total_output) 
-        
+        # fig = plot_DOA_and_results(args.group, args.dataset, total_input, total_y, total_output) 
+        fig = plt.figure()
     return metrics, fig, torch.mean(sparsity_tensor, dim=0)
 
 # from torchmetrics import R2Score
