@@ -276,7 +276,6 @@ class Attention(nn.Module):
         self.stored_vector_size = args.stored_vector_size
         self.K = torch.zeros(1, self.n_heads, args.stored_vector_size, self.head_dim).to(self.device) 
         self.V = torch.zeros(1, self.n_heads, args.stored_vector_size, self.head_dim).to(self.device)         
-        self.qkv = nn.Identity() if not(args.spiking_qkv_proj) else LIFNetwork(args, args.embed_dim, None,  self.inner_dim * 3, readout_fn='S_readout')
 
     def forward(self, x):
         n_samples, embed_dim = x.shape    
@@ -285,6 +284,7 @@ class Attention(nn.Module):
         self.V = torch.roll(self.V, -1, dims=2) # Shift the adress of the element of V we will replace
         qkv = self.qkv(x) # (n_samples, 3*embed_dim) -> this is equivalent to make 3 different fully connected to tensors q,k and v
         qkv = self.binarize_qkv(qkv) # Change to 1 or 0              
+        qkv = qkv.reshape(n_samples, 3, self.n_heads, self.head_dim)  
         qkv = qkv.permute(1, 0, 2, 3) # ((q, k and v), n_samples, n_heads, head_dim)
         q, k, v = qkv[0], qkv[1], qkv[2] # for each q, k and v tensors : (n_samples, n_heads, head_dim)
         v_sparsity = sparsity_measure(v) 
