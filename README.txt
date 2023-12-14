@@ -11,5 +11,3 @@ conda install pytorch=1.12.0 torchvision==0.13 torchaudio=0.12 cudatoolkit=11.3 
 
 -To install other required packages:
 pip install -r requirements.txt
-
-Results files and scripts coming soon.
