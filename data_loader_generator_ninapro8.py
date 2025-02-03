@@ -8,7 +8,7 @@ from scipy.signal import spectrogram
 from utils import download_dataset
 import os
 
-def _load_ninapro8_emg_windows(args, times, dataset_location='../datasets/ninapro8_dataset/'):
+def _load_ninapro8_emg_windows(args, times, dataset_location='./datasets/ninapro8_dataset'):
     """ Loading the raw sEMG dataset and apllying a few transformations:
     There are the options of normalize the data, apply a short time fourrier transform, or convert the signal into events (spikes)
 
@@ -36,7 +36,7 @@ def _load_ninapro8_emg_windows(args, times, dataset_location='../datasets/ninapr
             print(f'loading subject={subject}\ttime={time}...')         
             name = f'{dataset_location}/S{subject+1:.0f}_E1_A{time+1:.0f}.mat'   
             if not(os.path.exists(name)):        
-                download_dataset(f'S{subject+1:.0f}_E1_A{time+1:.0f}.mat')
+                download_dataset(root=dataset_location, name=f'S{subject+1:.0f}_E1_A{time+1:.0f}.mat')
             signal = torch.HalfTensor(loadmat(name)['emg']) # input
             DOF = torch.Tensor(loadmat(name)['glove']) # target
             # Converting the 18 channels degrees of freedom into 5 degrees of actuation through a matrix multiplicaton

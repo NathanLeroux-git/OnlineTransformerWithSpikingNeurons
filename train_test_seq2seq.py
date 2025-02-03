@@ -68,7 +68,7 @@ def test(args, model, test_loader, criterion, epoch, wandb_run = None, log_count
     sparsity_tensor = torch.zeros(len(test_loader), 9).to(args.device)
     with torch.no_grad():
         for batch_idx, (x, y) in enumerate(test_loader):
-            output, sparsity = model(x)
+            output, sparsity, qkv = model(x)
             sparsity_tensor[batch_idx] = sparsity
             n_samples, dim_out, time_steps = output.shape
             x = x[:,:,0:time_steps] if not(args.spiking_embedding) else x       

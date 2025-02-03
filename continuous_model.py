@@ -58,7 +58,7 @@ class ContinuousTransformer(nn.Module):
             x = self.pos_embed(x) # Positional embedding
             x = self.pos_drop(x) # Dropout
             x = self.binarize_embedding(x) # Convert each embedding value into either 1 or 0
-            x, sparsity = self.transformer_step(self.blocks, x) # Encoder block step
+            x, sparsity, qkv = self.transformer_step(self.blocks, x) # Encoder block step
             sparsity_tensor[token] = sparsity # Store the sparsity measurements
             x = self.norm(x) # Layer Norm
             x = self.NL(x) # Activation function (GeLU, or Identity if spiking classifier)
@@ -66,15 +66,14 @@ class ContinuousTransformer(nn.Module):
             x = x.unsqueeze(-1).expand(-1,-1,self.input_reshape.upsampling_factor) # Up sampling: we want the size of the output match the size of the target
             upsampled_output[:,:,token] = x
         upsampled_output = upsampled_output.flatten(2)
-        return upsampled_output, torch.mean(sparsity_tensor, dim=0) # We return the output of the network and measurements of the sparsity
+        return upsampled_output, torch.mean(sparsity_tensor, dim=0), qkv # We return the output of the network and measurements of the sparsity
     
     def transformer_step(self, blocks, x):   
         sparsity_tensor = torch.zeros(len(blocks), 9).to(x.device)
-        # Steps of different transformer encoder layers
         for b, block in enumerate(blocks): 
-            x, sparsity_attention, _, sparsity_mlp = block(x)
+            x, sparsity_attention, qkv, sparsity_mlp = block(x)
             sparsity_tensor[b] = torch.cat([sparsity_attention, sparsity_mlp.unsqueeze(0)])
-        return x, torch.mean(sparsity_tensor, dim=0)
+        return x, torch.mean(sparsity_tensor, dim=0), qkv
     
     def init_epoch(self, x):
         n_samples = x.shape[0]
@@ -915,25 +914,27 @@ class transformer(nn.Module):
         self.NL =  getattr(nn, args.end_NL)()                      
         self.classifier = MLP(args, args.embed_dim, args.classifier_hidden, dim_out) if not(args.spiking_classifier) else LIFNetwork(args, args.embed_dim, args.classifier_hidden, dim_out, readout_fn='U_readout')     
 
-    def forward(self,x,target=0):
+    def forward(self, x, target=0):
         n_samples = x.shape[0]
         x = self.input_reshape(x)
         x = self.PatchEmbed(x)
         x = self.pos_embed(x)
         x = self.pos_drop(x)
-        x = self.transformer_step(self.blocks, x)
+        x, sparsity, qkv = self.transformer_step(self.blocks, x)
         x = self.norm(x)
         x = self.NL(x)
         x = self.classifier(x)
         x = x.transpose(1,2)
         x = x.unsqueeze(-1).expand(-1,-1,-1,self.upsampling_factor)
         x = x.flatten(2)
-        return x
+        return x, sparsity, qkv
     
-    def transformer_step(self, blocks, x):    
-        for block in blocks: 
-            x = block(x)
-        return x 
+    def transformer_step(self, blocks, x):   
+        sparsity_tensor = torch.zeros(len(blocks), 9).to(x.device)
+        for b, block in enumerate(blocks): 
+            x, sparsity_attention, qkv, sparsity_mlp = block(x)
+            sparsity_tensor[b] = torch.cat([sparsity_attention, sparsity_mlp.unsqueeze(0)])
+        return x, torch.mean(sparsity_tensor, dim=0), qkv
     
     def init_epoch(self, x):
         return    
@@ -986,7 +987,7 @@ class ParallelAttention(nn.Module):
         weighted_average = weighted_average.flatten(2) # (n_samples, n_tokens, n_heads*head_dim=embed_dim) flattens only above dimension 2 #
         x = self.proj(weighted_average) # (n_samples, n_tokens, head_embed_dim)
         x = self.proj_drop(x)
-        return x
+        return x, torch.zeros(8).to(x.device), None
     
 class ParallelCrossAttention(nn.Module):
     def __init__(self, args):

@@ -1,5 +1,6 @@
 import wandb
-import requests
+# import requests# 
+import wget
 import os
 
 def del_previous_plots(epoch, run):
@@ -36,10 +37,11 @@ def fix_LIF_states(model_to_load):
                 model_to_load[k] = v[0,:].reshape((1, LIF_neurons_num))
     return model_to_load
 
-def download_dataset(name):
-    url = 'http://ninapro.hevs.ch/system/files/DB8/'+name
+def download_dataset(root, name):
+    url = 'http://ninapro.hevs.ch/files/DB8/'+name
     print(f'Downloading request on {url}, can take several minutes...')
-    r = requests.get(url, allow_redirects=True)
-    folder_name = '../datasets/ninapro8_dataset'
-    os.makedirs(folder_name, exist_ok=True)
-    open(folder_name+'/'+name, 'wb').write(r.content)
+    # r = requests.get(url, allow_redirects=True)
+    os.makedirs(root, exist_ok=True)
+    wget.download(url, out=root)
+    # open(root+'/'+name, 'wb').write(r.content)
+    

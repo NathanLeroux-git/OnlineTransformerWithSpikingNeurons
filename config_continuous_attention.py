@@ -39,6 +39,8 @@ def return_args(**outer_params):
         sparsity_loss_coeff = 0,        
         
         # dataset parameters
+        dim_in=16,
+        dim_out=5,
         data_augmentation_factor=64,
         normalize_data=True,
         window_size=2000,

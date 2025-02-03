@@ -11,23 +11,21 @@ import continuous_model
 from continuous_model import torch_init_LSUV
 from config_continuous_attention import return_args
 from utils import del_previous_plots, transfer_weights
-from fix_LIFstates_model_file import fix_LIF_states
-from send_mail import failure_alert
 
-device='cpu'
+device='cuda:0'
 subject=0
 lr=1e-3
 bs=64
 datAug=64
 wd=0
 ws=2000 
-ks=30
-stride=28
+ks=7
+stride=5
 padding=int((ks-stride)/2)
 ntokens=int((ws-ks+2*padding)/stride+1)
 stored_vector_size=150
-name = f'quantized_transformer_sub_{subject:02d}_continuous_transfo_conv_embed_lr={lr:.0e}_datAug={datAug}_bs={bs}_wd={wd:.0e}_ws={ws}_np={ntokens}_svs={stored_vector_size}_ks={ks}_s={stride}_p={padding} (0)'
-group = "TESTS_quantization"
+name = f'transformer_sub_{subject:02d}_continuous_transfo_conv_embed_lr={lr:.0e}_datAug={datAug}_bs={bs}_wd={wd:.0e}_ws={ws}_np={ntokens}_svs={stored_vector_size}_ks={ks}_s={stride}_p={padding} (0)'
+group = "OST"
 
 def main(**kwargs): 
     # try:
@@ -49,25 +47,15 @@ def main(**kwargs):
     torch.manual_seed(args.seed) if isinstance(args.seed, int) else None
 
     # load dataset on RAM and make appropriate transformations 
-    if args.dataset=='ninapro8':
-        from data_loader_generator_ninapro8 import _load_ninapro8_emg_windows as _load_data
-        from data_loader_generator_ninapro8 import make_loader
-        # n_channels, data_train, start_idx_train = _load_data(args, times=[0,1])
-        n_channels, data_test, start_idx_test = _load_data(args, times=[2])
-    elif args.dataset=='ninapro5':
-        from data_loader_generator_ninapro5 import _load_ninapro5_emg_windows as _load_data
-        from data_loader_generator_ninapro5 import make_loader
-        n_channels, data_train, start_idx_train = _load_data(args, times=[0,1,2], train=True, ratio=2/3)
-        # n_channels, data_test, start_idx_test = _load_data(args, times=[0,1,2], train=False, ratio=2/3)
+    from data_loader_generator_ninapro8 import _load_ninapro8_emg_windows as _load_data
+    from data_loader_generator_ninapro8 import make_loader
+    data_train, start_idx_train = _load_data(args, times=[0,1])
+    data_test, start_idx_test = _load_data(args, times=[2])
     
-    # n_channels=16
-
     # define model, optimizer, scheduler and loss function
-    model_test = getattr(continuous_model, args.Net)(args, n_channels, 5).to(args.device)
-    model_train = getattr(continuous_model, "ParallelTrainingTransformer")(args, n_channels, 5).to(args.device)
-    # model_train = getattr(continuous_model, args.Net)(args, n_channels, 5).to(args.device)
+    model_test = getattr(continuous_model, args.Net)(args, args.dim_in, args.dim_out).to(args.device)
+    model_train = getattr(continuous_model, args.trainingNet)(args, args.dim_in, args.dim_out).to(args.device)
     model_to_load = torch.load("./saved_models/"+args.pre_trained_model_name+".pt", map_location=args.device) if args.pre_trained_model_name is not None else None
-    model_to_load = fix_LIF_states(args, model_to_load)
     model_train.load_state_dict(model_to_load, strict=False) if args.pre_trained_model_name is not None else None
     transfer_weights(model_train, model_test)
     
@@ -149,11 +137,6 @@ def main(**kwargs):
             torch.save(model_train.state_dict(), "./saved_models/"+args.save_model_name+".pt")
     wandb_run.finish()
     return True
-    # except Exception as error:
-    #     error_message=f'Run: {wandb_run._name}\n{wandb_run.get_url()}\nof group: {wandb_run._get_group()}\n\nFailed or Crashed\n\nError message:\n{error}'
-    #     print(error_message)
-    #     failure_alert(error_message)       
-    #     return False 
 
 def resume_scheduler(scheduler, previous_job_epoch):
     [scheduler.step() for _ in range(previous_job_epoch)]
@@ -161,30 +144,19 @@ def resume_scheduler(scheduler, previous_job_epoch):
 
 if __name__ == '__main__':   
     kwargs = dict(outer_parameters=dict(
-                                        project="sEMG_DOA_regression_start_05_01_23",
+                                        project="sEMG_DOA",
                                         name=name,
                                         group=group,
                                         dataset='ninapro8',
                                         device=device,   
-                                        subjects=[subject],           
-                                        Net='transformer',
-                                        # Net="ContinuousTransformer",    
-                                        embedding_model='ConvPatchEmbed',    
+                                        subjects=subject,           
+                                        Net='ContinuousTransformer',  
                                         log_interval=40,
                                         epochs=1,                                 
-                                        
-                                        # spiking_transformer_mlp=True,
-                                        # mlp_depth=3,      
-                                                             
-                                        # head_dim=8,   
-                                        # n_heads=4,        
-                                        
-                                        # attention_dilation=2,
                                         
                                         loss_fn="L1Loss",
                                         window_size=ws,
                                         sliding_size=ws,
-                                        n_patches=ntokens,
                                         stored_vector_size=stored_vector_size,
                                         test_batch_size=1,
                                         batch_size=bs,
@@ -197,8 +169,6 @@ if __name__ == '__main__':
                                         
                                         save_model=True,
                                         save_model_name=name,
-                                        
-                                        pre_trained_model_name="transformer_sub_00_continuous_transfo_conv_embed_lr=1e-03_datAug=64_bs=64_wd=0e+00_ws=2000_np=71_svs=150_ks=30_s=28_p=1 (0)"
                                         )
                 )
                 
