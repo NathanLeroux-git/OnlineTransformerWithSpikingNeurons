@@ -19,3 +19,6 @@ pip3 install torch torchvision torchaudio --index-url https://download.pytorch.o
 pip install -r requirements.txt
 
 -Dataset download authomatically to ./datasets/ninapro8_dataset/
+
+Try a run on a single subject with python main_2models.py
+Run training on all subjects separatly using pyton run_all_subjects_ninapro8.py
